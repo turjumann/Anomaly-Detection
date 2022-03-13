@@ -11,6 +11,7 @@ using Microsoft.VisualBasic.FileIO;
 using Microsoft.ML;
 using System.IO;
 using System.Windows.Forms.DataVisualization.Charting;
+using Microsoft.ML.Transforms.TimeSeries;
 
 namespace Training_Day_5
 {
@@ -21,10 +22,12 @@ namespace Training_Day_5
         private DataTable dataTable = null;
         Tuple<string, string> tup = null;
 
-
+        public int numOfEntries;
+        public double confidence;
         public Form1()
         {
             InitializeComponent();
+            checkBox1.Checked = true;
         }
 
 
@@ -37,7 +40,8 @@ namespace Training_Day_5
             BindDataCSV(txtFilePath.Text);
             var length = System.IO.File.ReadAllLines(ofd.FileName).Length + "";
             var lengthWOHeaders = Int32.Parse(length) - 1;
-            txtSize.Text = lengthWOHeaders.ToString();
+            numOfEntries = lengthWOHeaders;
+            label10.Text = " ( " + numOfEntries.ToString() + "  /  ";
 
 
         }
@@ -76,12 +80,9 @@ namespace Training_Day_5
 
         private void btnRun_Click(object sender, EventArgs e)
         {
-
-
-            // Set filepath from text from filepath textbox.
+            anomalyText.Enabled = true;
             filePath = txtFilePath.Text;
 
-            // Check if file exists.
             if (File.Exists(filePath))
             {
                 dict = new Dictionary<int, Tuple<string, string>>();
@@ -89,14 +90,8 @@ namespace Training_Day_5
                 if (filePath != "")
                 {
                     anomalyText.Text = "";
-                    
-
-                    // Display preview of dataset and graph.
                     displayDataTableAndGraph();
-
-
                 }
-                // If file path textbox is empty, prompt user to input file path.
                 else
                 {
                     MessageBox.Show("Please input file path.");
@@ -107,18 +102,156 @@ namespace Training_Day_5
                 MessageBox.Show("File does not exist. Try finding the file again.");
             }
 
-
             if (checkBox1.Checked)
             {
-                modelCall();
+                if (rbDetectIidSpike.Checked && textPValue.Text != "" && txtConfidence.Text != "")
+                {
+                    detectIidSpike();
+                    lblMethodType.Text = " using " + rbDetectIidSpike.Text + " method";
+                }
+                else if (rbDetectSpikeBySsa.Checked && textPValue.Text != "" && txtConfidence.Text != "")
+                {
+                    detectSpikeBySsa();
+                    lblMethodType.Text = " using " + rbDetectSpikeBySsa.Text + " method";
 
+                }
 
+                else
+                {
+                    MessageBox.Show("Make sure input fields are not empty and detection method is checked", "Something is missing...",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
             }
             else
             {
-                MessageBox.Show("Make sure to enable Spike Detection feature.", "Spike Detection...",
-    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("Make sure to click on Spike Detection checkbox.", "Spike Detection...",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
+        }
+
+
+ 
+
+        private void detectSpikeBySsa()
+        {
+            const int SeasonalitySize = 5;
+            const int TrainingSeasons = 3;
+            const int TrainingSize = SeasonalitySize * TrainingSeasons;
+
+            var mlContext = new MLContext();
+            int size = numOfEntries;
+
+
+            // Load Data
+            var dataView = mlContext.Data.LoadFromTextFile<RealTraficData>(txtFilePath.Text, hasHeader: true, separatorChar: ',');
+            var travelTimeList = new List<RealTraficData>();
+            var emptyDataView = mlContext.Data.LoadFromEnumerable(travelTimeList);
+            var outputColumnName = nameof(RealTraficPrediction.Prediction);
+            var inputColumnName = nameof(RealTraficData.value);
+            confidence = Convert.ToDouble(txtConfidence.Text);
+
+            var pvalueHistoryLength = size / int.Parse(textPValue.Text);
+
+
+            var estimator = mlContext.Transforms.DetectSpikeBySsa(outputColumnName,
+            inputColumnName, confidence, pvalueHistoryLength, TrainingSize, SeasonalitySize + 1);
+
+            var transformedModel = estimator.Fit(emptyDataView);
+
+
+            var transformData = transformedModel.Transform(dataView);
+            var predictions = mlContext.Data.CreateEnumerable<RealTraficPrediction>(transformData, reuseRowObject: false);
+
+
+
+            int a = 0;
+            var counter = 0;
+
+            foreach (var prediction in predictions)
+            {
+
+                if (prediction.Prediction[0] == 1)
+                {
+                    counter++;
+                    var xAxisDate = dict[a].Item1;
+                    var yAxisSalesNum = dict[a].Item2;
+
+
+                    graph.Series["Series1"].Points[a].SetValueXY(a, yAxisSalesNum);
+                    graph.Series["Series1"].Points[a].MarkerStyle = MarkerStyle.Star4;
+                    graph.Series["Series1"].Points[a].MarkerSize = 10;
+                    graph.Series["Series1"].Points[a].MarkerColor = Color.DarkRed;
+
+                    string text = "Spike" + " detected in " + xAxisDate + ": " + yAxisSalesNum + "\n";
+                    anomalyText.SelectionColor = Color.Red;
+                    anomalyText.AppendText(text);
+
+                    DataGridViewRow row = dataGridView1.Rows[a];
+                    row.DefaultCellStyle.BackColor = Color.DarkRed;
+                    row.DefaultCellStyle.ForeColor = Color.White;
+                }
+                a++;
+            }
+            lblNumOfAnoms.Text = counter.ToString();
+        }
+
+
+        private void detectIidSpike()
+        {
+
+
+            // Define Vars
+            var mlContext = new MLContext();
+            int size = numOfEntries;
+            confidence = Convert.ToDouble(txtConfidence.Text);
+
+            // Load Data
+            var dataView = mlContext.Data.LoadFromTextFile<RealTraficData>(txtFilePath.Text, hasHeader: true, separatorChar: ',');
+            var travelTimeList = new List<RealTraficData>();
+            var emptyDataView = mlContext.Data.LoadFromEnumerable(travelTimeList);
+
+            var estimator = mlContext.Transforms.DetectIidSpike(
+                outputColumnName: nameof(RealTraficPrediction.Prediction),
+                inputColumnName: nameof(RealTraficData.value),
+                confidence, pvalueHistoryLength: size / int.Parse(textPValue.Text));
+            var transformedModel = estimator.Fit(emptyDataView);
+
+
+            var transformData = transformedModel.Transform(dataView);
+
+            var predictions = mlContext.Data.CreateEnumerable<RealTraficPrediction>(transformData, reuseRowObject: false);
+
+
+
+            int a = 0;
+            var counter = 0;
+
+            foreach (var prediction in predictions)
+            {
+
+                if (prediction.Prediction[0] == 1)
+                {
+                    counter++;
+                    var xAxisDate = dict[a].Item1;
+                    var yAxisSalesNum = dict[a].Item2;
+
+
+                    graph.Series["Series1"].Points[a].SetValueXY(a, yAxisSalesNum);
+                    graph.Series["Series1"].Points[a].MarkerStyle = MarkerStyle.Star4;
+                    graph.Series["Series1"].Points[a].MarkerSize = 10;
+                    graph.Series["Series1"].Points[a].MarkerColor = Color.DarkRed;
+
+                    string text = "Spike" + " detected in " + xAxisDate + ": " + yAxisSalesNum + "\n";
+                    anomalyText.SelectionColor = Color.Red;
+                    anomalyText.AppendText(text);
+
+                    DataGridViewRow row = dataGridView1.Rows[a];
+                    row.DefaultCellStyle.BackColor = Color.DarkRed;
+                    row.DefaultCellStyle.ForeColor = Color.White;
+                }
+                a++;
+            }
+            lblNumOfAnoms.Text = counter.ToString();
         }
         private void displayDataTableAndGraph()
         {
@@ -154,8 +287,9 @@ namespace Training_Day_5
             
             double yMax = Convert.ToDouble(dataTable.Compute($"max([{yAxis}])", string.Empty));
             double yMin = Convert.ToDouble(dataTable.Compute($"min([{yAxis}])", string.Empty));
+            Console.WriteLine("yMin: " + yMin + " yMax: " + yMax);
 
-            
+
             graph.DataSource = dataTable;
 
             
@@ -170,6 +304,7 @@ namespace Training_Day_5
             graph.ChartAreas["ChartArea1"].AxisX.Interval = a / 10;
 
             graph.ChartAreas["ChartArea1"].AxisY.Maximum = yMax;
+
             graph.ChartAreas["ChartArea1"].AxisY.Minimum = yMin;
             graph.ChartAreas["ChartArea1"].AxisY.Interval = yMax / 10;
 
@@ -179,74 +314,11 @@ namespace Training_Day_5
         }
 
 
-        private void modelCall()
-        {
-            
-
-            // Define Vars
-            var mlContext = new MLContext();
-            int size = int.Parse(txtSize.Text);
-
-            // Load Data
-            var dataView = mlContext.Data.LoadFromTextFile<RealTraficData>(txtFilePath.Text, hasHeader: true, separatorChar: ',');
-            var travelTimeList = new List<RealTraficData>();
-            var emptyDataView = mlContext.Data.LoadFromEnumerable(travelTimeList);
-
-            // Create Estimator and Build Model
-            var estimator = mlContext.Transforms.DetectIidSpike(
-                outputColumnName: nameof(RealTraficPrediction.Prediction),
-                inputColumnName: nameof(RealTraficData.value),
-                confidence: int.Parse(txtConfidence.Text),
-   
-                pvalueHistoryLength: size / 4);
-            var transformedModel = estimator.Fit(emptyDataView);
-
-  
-            var transformData = transformedModel.Transform(dataView);
-
-            var predictions = mlContext.Data.CreateEnumerable<RealTraficPrediction>(transformData, reuseRowObject: false);
-            
-
-            
-            int a = 0;
-            var counter = 0;
-
-            foreach (var prediction in predictions)
-            {
-                
-                if (prediction.Prediction[0] == 1)
-                {
-                    counter++;
-                    var xAxisDate = dict[a].Item1;
-                    var yAxisSalesNum = dict[a].Item2;
-
-
-                    graph.Series["Series1"].Points[a].SetValueXY(a, yAxisSalesNum);
-                    graph.Series["Series1"].Points[a].MarkerStyle = MarkerStyle.Star4;
-                    graph.Series["Series1"].Points[a].MarkerSize = 10;
-                    graph.Series["Series1"].Points[a].MarkerColor = Color.DarkRed;
-
-                    string text = "Spike" + " detected in " + xAxisDate + ": " + yAxisSalesNum + "\n";
-                    anomalyText.SelectionColor = Color.Red;
-                    anomalyText.AppendText(text);
-
-                    DataGridViewRow row = dataGridView1.Rows[a];
-                    row.DefaultCellStyle.BackColor = Color.DarkRed;
-                    row.DefaultCellStyle.ForeColor = Color.White;
-                }
-                a++;
-            }
-            lblNumOfAnoms.Text = counter.ToString();
-        }
        
         private void Form1_Load(object sender, EventArgs e)
         {
 
         }
 
-        private void graph_Click(object sender, EventArgs e)
-        {
-
-        }
     }
 }

@@ -9,8 +9,8 @@
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <ProjectGuid>{4DF1063C-3C17-4533-AD1E-9084C49D6C79}</ProjectGuid>
     <OutputType>WinExe</OutputType>
-    <RootNamespace>Training_Day_5</RootNamespace>
-    <AssemblyName>Training Day 5</AssemblyName>
+    <RootNamespace>desktop_application</RootNamespace>
+    <AssemblyName>Desktop Application</AssemblyName>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
@@ -155,6 +155,7 @@
     <Compile Include="Properties\Resources.Designer.cs">
       <AutoGen>True</AutoGen>
       <DependentUpon>Resources.resx</DependentUpon>
+      <DesignTime>True</DesignTime>
     </Compile>
     <None Include="packages.config" />
     <None Include="Properties\Settings.settings">
